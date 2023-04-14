@@ -20,6 +20,7 @@ This is layout.html.
 </body>
 </html>
 ```
+
 #### views/index.html
 ```html
 <!DOCTYPE html>
@@ -34,6 +35,13 @@ This is index.html.
 {{end}}
 </body>
 </html>
+```
+
+#### views/partial.html
+```html
+<body>
+This is partial.html.
+</body>
 ```
 
 #### main.go
@@ -54,14 +62,20 @@ var viewsFS embed.FS
 func main() {
 	e := echo.New()
 	e.Renderer = html.NewFileSystem(viewsFS, "views", "layouts/main", ".html")
+	// with layout
 	e.GET("/", func(c echo.Context) error {
 		return c.Render(http.StatusOK, "index", echo.Map{})
+	})
+	// without layout
+	e.GET("/partial", func(c echo.Context) error {
+		return c.Render(http.StatusOK, "partial.html", echo.Map{})
 	})
 	e.Logger.Fatal(e.Start(":9000"))
 }
 ```
 
 #### Generated HTML
+index.html
 ```html
 <!DOCTYPE html>
 <html lang="en">
@@ -75,4 +89,10 @@ This is index.html.
 
 </body>
 </html>
+```
+partial.html
+```html
+<body>
+this is partial.html.
+</body>
 ```

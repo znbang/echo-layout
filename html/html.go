@@ -38,7 +38,6 @@ func NewFileSystem(fileSystem fs.FS, directory, layout, extension string) *Engin
 }
 
 type Engine struct {
-	loaded     bool
 	fileSystem fs.FS
 	directory  string
 	extension  string
@@ -47,66 +46,62 @@ type Engine struct {
 	templates  map[string]*template.Template
 }
 
-func (e *Engine) load() error {
-	if e.loaded {
-		return nil
+func (e *Engine) Render(w io.Writer, name string, data interface{}, c echo.Context) error {
+	useLayout := true
+	if filepath.Ext(name) == e.extension {
+		useLayout = false
+		name = strings.TrimSuffix(name, e.extension)
 	}
 
 	e.mutex.Lock()
-	defer e.mutex.Unlock()
+	tpl, ok := e.templates[name]
+	e.mutex.Unlock()
 
-	var layoutPath string
-	if e.layout != "" {
-		layoutPath = e.layout + e.extension
+	if !ok {
+		tplList := make([]string, 0)
+		if useLayout && e.layout != "" {
+			tplList = append(tplList, e.layout)
+		}
+		tplList = append(tplList, name)
+
+		tpl = template.New(name)
+		for _, v := range tplList {
+			var temp *template.Template
+			if v == name {
+				temp = tpl
+			} else {
+				temp = tpl.New(v)
+			}
+			content, err := e.load(v)
+			if err != nil {
+				return err
+			}
+			_, err = temp.Parse(content)
+			if err != nil {
+				return fmt.Errorf("parse %v failed: %v", v, e)
+			}
+		}
+
+		e.mutex.Lock()
+		e.templates[name] = tpl
+		e.mutex.Unlock()
 	}
 
-	walkFunc := func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if d.IsDir() {
-			return nil
-		}
-
-		if ext := filepath.Ext(path); ext != e.extension {
-			return nil
-		}
-
-		if layoutPath != "" && strings.HasSuffix(path, layoutPath) {
-			return nil
-		}
-
-		var tmpl *template.Template
-		if layoutPath != "" {
-			tmpl, err = template.ParseFS(e.fileSystem, layoutPath, path)
-		} else {
-			tmpl, err = template.ParseFS(e.fileSystem, path)
-		}
-
-		if err == nil {
-			name := strings.TrimSuffix(path, e.extension)
-			e.templates[name] = tmpl
-		}
-
-		return err
+	if useLayout && e.layout != "" {
+		return tpl.ExecuteTemplate(w, e.layout, data)
+	} else {
+		return tpl.ExecuteTemplate(w, name, data)
 	}
-
-	e.loaded = true
-
-	return fs.WalkDir(e.fileSystem, ".", walkFunc)
 }
 
-func (e *Engine) Render(w io.Writer, name string, data interface{}, c echo.Context) error {
-	if !e.loaded {
-		if err := e.load(); err != nil {
-			return err
-		}
+func (e *Engine) load(name string) (string, error) {
+	file, err := e.fileSystem.Open(name + e.extension)
+	if err != nil {
+		return "", fmt.Errorf("open %v failed: %v", name, err)
 	}
-
-	if tmpl := e.templates[name]; tmpl == nil {
-		return fmt.Errorf("template not found: %v", name)
-	} else {
-		return tmpl.Execute(w, data)
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("read %v failed: %v", name, err)
 	}
+	return string(content), err
 }
